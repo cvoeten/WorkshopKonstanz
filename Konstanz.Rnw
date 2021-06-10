@@ -48,7 +48,7 @@
 }
 
 \usepackage[backend=biber,style=apa,natbib=true,uniquename=false,uniquelist=false,mincitenames=1,maxcitenames=3,citetracker=true,hyperref,useprefix]{biblatex}
-\addbibresource{../SCHRIJVEN/referenties.bib}
+\addbibresource{../../SCHRIJVEN/referenties.bib}
 
 \begin{document}
 \begin{frame}
@@ -114,13 +114,13 @@ opts_chunk$set(out.extra='keepaspectratio',
 	\frametitle{Example: eyetracking data with onset competitor presented in --12 dB noise \citep{cogsci}}
 <<message=FALSE,echo=FALSE,fig.show='hold',fig.width=5>>=
 library(tidyr)
-pd <- read.csv('../DATA/Odette/data Odette.csv') |>
+pd <- read.csv('../../DATA/Odette/data Odette.csv') |>
 	filter(source == 1, condition == 'onsetSNR12') |>
 	group_by(time) |>
 	summarize(Target = mean(onset_comp), Distractor = plogis(mean(distractor))) |>
 	pivot_longer(-time,names_to='Stimulus')
 print(ggplot(pd,aes(time,value,color=Stimulus,value=Stimulus)) + geom_line() + xlab('Time (ms)') + ylab('Fixation proportion to target'))
-plotdata <- read.csv('../DATA/Odette/target1.csv') |>
+plotdata <- read.csv('../../DATA/Odette/target1.csv') |>
 	filter(grepl('Onset',facet), grepl('12',facet))
 vline <- filter(plotdata, change > 0)
 print(ggplot(plotdata,aes(time,value)) + geom_ribbon(aes(ymin=cimin,ymax=cimax),alpha=.3) + geom_line() + theme_bw() + xlab('Time (ms)') + ylab('Fixation proportion to target (logit)') + geom_vline(data=vline,aes(xintercept=time),color='red'))
@@ -332,10 +332,10 @@ gam.check(model)
 	\vspace*{-2pt}
 	\begin{columns}
 		\begin{column}{0.5\textwidth}
-		\includegraphics[height=\textheight,keepaspectratio]{badfit}
+		\includegraphics[height=\textheight,keepaspectratio]{../../PRAATJES/badfit}
 		\end{column}
 		\begin{column}{0.5\textwidth}
-		\includegraphics[height=\textheight,keepaspectratio]{gamcheckok}
+		\includegraphics[height=\textheight,keepaspectratio]{../../PRAATJES/gamcheckok}
 		\end{column}
 	\end{columns}
 \end{frame}
@@ -353,7 +353,7 @@ gam.check(model)
 \begin{frame}
 	\frametitle{Autocorrelation}
 	Specifically for time-series data: check that you indeed modeled all of the time-series structure, even with appropriate $k$ values (\texttt{acf(resid(model))})\\
-	\includegraphics[height=.8\textheight,keepaspectratio]{acf}\\
+	\includegraphics[height=.8\textheight,keepaspectratio]{../../PRAATJES/acf}\\
 	Requires data to be sorted by time last!
 \end{frame}
 
@@ -468,9 +468,9 @@ group_by(lexdec, Class, Frequency) |>
 	\frametitle{Difference smooths}
 \footnotesize
 <<fig.show='hold',fig.width=5>>=
-lexdec$ClassOrdered <- ordered(lexdec$Class) |>
-	C(treatment)
-model <- gam(RT ~ s(Frequency) + s(Frequency,by=ClassOrdered),data=lexdec,method='ML')
+lexdec$ClassOrdered <- ordered(lexdec$Class) |> C(treatment)
+model <- gam(RT ~ ClassOrdered + s(Frequency) + s(Frequency,by=ClassOrdered),
+	     data=lexdec,method='ML')
 plot(model,rug=FALSE,shade=TRUE)
 @
 \end{frame}
@@ -492,7 +492,7 @@ plot(model,rug=FALSE,shade=TRUE)
 	\frametitle{Fitting the model}
 \footnotesize
 <<fig.show='hold',fig.width=5>>=
-model <- gam(RT ~ s(Frequency,by=Class),data=lexdec,method='REML')
+model <- gam(RT ~ Class + s(Frequency,by=Class),data=lexdec,method='REML')
 plot(model,rug=FALSE,shade=TRUE)
 @
 \end{frame}
