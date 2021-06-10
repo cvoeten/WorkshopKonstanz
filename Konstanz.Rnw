@@ -1,0 +1,596 @@
+\documentclass[aspectratio=1610]{beamer}
+\usetheme{Rochester}
+\usecolortheme[named=purple]{structure}
+\usefonttheme{professionalfonts}
+\useinnertheme{default}
+\useoutertheme{default}
+\usepackage{calc}
+\newlength{\ceskolength}
+\setlength\ceskolength{.75\paperwidth-2ex}
+\defbeamertemplate*{footline}{cesko}{%
+	\leavevmode%
+	\hbox{%
+	\begin{beamercolorbox}[wd=\paperwidth,ht=2.65ex,dp=1.5ex,right]{date in head/foot}%
+		\usebeamerfont{date in head/foot}%
+		\insertframenumber{} / \inserttotalframenumber%
+		\hspace*{2ex}%
+	\end{beamercolorbox}}%
+	\vskip0pt%
+}
+\usebeamertemplate{cesko}
+\setbeamertemplate{footline}[cesko]
+\beamertemplatenavigationsymbolsempty
+
+\usepackage[english]{babel}
+\newcommand\boxednumber[1]
+{%
+  \hbox{%
+    \usebeamerfont*{item projected}%
+    \usebeamercolor[bg]{item projected}%
+    \vrule width2.25ex height1.85ex depth.4ex%
+    \hskip-2.25ex%
+    \hbox to2.25ex{%
+      \hfil%
+      \color{fg}#1%
+      \hfil}%
+  }%
+}
+\renewcommand\emph[1]{{\color{beamer@structure@color}{#1}}}
+\newcommand\topicsilent[1]{%
+	\begin{frame}%
+	\Huge\centering%
+	#1%
+	\end{frame}%
+}
+\newcommand\topic[1]{%
+	\section{#1}%
+	\topicsilent{#1}%
+}
+
+\usepackage[backend=biber,style=apa,natbib=true,uniquename=false,uniquelist=false,mincitenames=1,maxcitenames=3,citetracker=true,hyperref,useprefix]{biblatex}
+\addbibresource{../SCHRIJVEN/referenties.bib}
+
+\begin{document}
+\begin{frame}
+\title{Generalized Additive Models}
+\subtitle{What can they do for you?}
+\author{\begin{tabular}{c}Cesko Voeten\\\\Fryske Akademy\\Leiden University Centre for Linguistics\\Leiden Institute for Brain and Cognition\end{tabular}}
+\date{}
+\maketitle
+\end{frame}
+
+\begin{frame}
+	\frametitle{Outline}
+	\tableofcontents
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Setup\dots}
+\footnotesize
+<<message=FALSE>>=
+if (packageVersion('base') < '4.1.0') {
+	stop('Your R is too old, please update')
+}
+pkgs <- c('knitr','mgcv','MASS','dplyr','ggplot2','magrittr','languageR')
+if (any(missing <- !sapply(pkgs,\(x) do.call('require',list(x))))) {
+	stop('Please install ',paste(pkgs[missing],collapse=', '))
+}
+opts_chunk$set(out.extra='keepaspectratio',
+	       fig.align='center',
+	       out.height='0.7\\textheight',
+	       fig.width=10,
+	       fig.height=4)
+@
+\end{frame}
+
+\topic{What problem do GAMs solve?}
+
+\begin{frame}
+	\frametitle{The messiness of reality}
+	\begin{itemize}
+		\item Most statistical techniques used by linguists assume a linear relationship between response(s) and predictor(s)
+		\item Unfortunately, for data from human subjects (as is most data from linguistics), reality doesn't agree:
+			\begin{itemize}
+				\item phonetics: the vocal tract does not snap from one segment into the next
+				\item psycholinguistics: all sorts of nonlinear effects, e.g.~fatigue over trials
+				\item sociolinguistics: regional variation can be spread out over a 2-D map
+				\item neurolinguistics: topographical distribution of ERPs is spread out over the surface of a sphere
+				\item Etc
+			\end{itemize}
+		\item See e.g.~\citet{caveofshadows}
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{GAMs}
+	\begin{itemize}
+		\item GAMs are a form of \emph{regression analysis} that can model nonlinearities
+		\item They are closely related (in fact, equivalent) to mixed-effects models
+		\item They are especially useful for \emph{time-series} data, such as acoustics, articulation, eyetracking, etc.
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Example: eyetracking data with onset competitor presented in --12 dB noise \citep{cogsci}}
+<<message=FALSE,echo=FALSE,fig.show='hold',fig.width=5>>=
+library(tidyr)
+pd <- read.csv('../DATA/Odette/data Odette.csv') |>
+	filter(source == 1, condition == 'onsetSNR12') |>
+	group_by(time) |>
+	summarize(Target = mean(onset_comp), Distractor = plogis(mean(distractor))) |>
+	pivot_longer(-time,names_to='Stimulus')
+print(ggplot(pd,aes(time,value,color=Stimulus,value=Stimulus)) + geom_line() + xlab('Time (ms)') + ylab('Fixation proportion to target'))
+plotdata <- read.csv('../DATA/Odette/target1.csv') |>
+	filter(grepl('Onset',facet), grepl('12',facet))
+vline <- filter(plotdata, change > 0)
+print(ggplot(plotdata,aes(time,value)) + geom_ribbon(aes(ymin=cimin,ymax=cimax),alpha=.3) + geom_line() + theme_bw() + xlab('Time (ms)') + ylab('Fixation proportion to target (logit)') + geom_vline(data=vline,aes(xintercept=time),color='red'))
+@
+\end{frame}
+
+\topic{Smoothing splines}
+
+\begin{frame}[fragile]
+	\frametitle{Fitting a spline}
+\footnotesize
+<<>>=
+ggplot(mcycle,aes(times,accel)) +
+	geom_point() +
+	stat_smooth(method='lm',formula=y ~ x + I(x^2) + I(x^3))
+@
+\end{frame}
+
+\begin{frame}
+	\frametitle{Penalized splines}
+	\begin{itemize}
+		\item We've just invented a very basic spline with four \emph{basis functions} (intercept, $x$, $x^2$, $x^3$)
+		\item Is this complexity sufficient (cf.~underfitting) and warranted by the data (cf.~overfitting)?
+		\item Model comparisons could be used to take out, e.g.,~the quadratic and cubic components as a whole, but what if we need just a little bit of both?
+		\item Or what if we need a different basis function altogether, e.g.~a spline on the sphere?
+		\item Enter GAMs
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{More complex spline bases}
+	E.g.:~the \emph{cubic regression spline} --- here given ten basis functions:
+\footnotesize
+<<>>=
+model <- gam(accel ~ s(times,bs='cr',k=10),data=mcycle,method='ML')
+lp <- predict(model,type='lpmatrix')
+matplot(sort(mcycle$times),lp,type='l')
+abline(v=model$smooth[[1]]$xp,lty=2,col='gray')
+@
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Fitted to data}
+\footnotesize
+<<>>=
+par(mfrow=c(2,5),mar=rep(1,4))
+plot(accel ~ times,mcycle,type='n'); abline(lm(accel ~ 1,mcycle))
+plot(accel ~ times,mcycle,type='n'); abline(lm(accel ~ times,mcycle))
+for (k in 3:10) plot(gam(accel~s(times,bs='cr',k=k),data=mcycle),rug=FALSE)
+@
+\end{frame}
+
+\begin{frame}
+	\frametitle{Penalized splines, again}
+	\begin{itemize}
+		\item A GAM is a penalized GLM that automatically determines a \emph{smoothing parameter} for each spline (called `smooths' in GAM parlance)
+		\item Each of our spline's 10 basis functions is given a regression coefficient
+		\item However, these 10 regression coefficients are \emph{penalized} by the one smoothing parameter
+		\item S.p.~==~0: fit the data exactly (very wiggly spline, overfitted). S.p.~==~Inf: reduce to a straight line (very smooth spline, underfitted)
+		\item The smoothing parameter is selected automatically through, e.g.,~REML --- no work for you!
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Relation to the mixed-effects model}
+	\begin{itemize}
+		\item There is an important analogy between GAMs and mixed-effects models
+		\item Random intercepts can be viewed as ``splines'' that generate a single line for every subject, item, etc.
+		\item Random slopes produce interactions
+		\item The GAM smoothing parameter is inversely related to the mixed-effects-model's variance component
+		\item Each spline coefficient is a ``subject'' from a ``population'' of possible splines (`a convenient fiction to implement a smoother'; \citealp{hodges})
+		\item Therefore, every mixed-effects model is also a GAM and every GAM is also a mixed-effects model
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Functions for fitting GAMs}
+	In package \texttt{mgcv}:
+	\begin{itemize}
+		\item \texttt{gam}: focus for today
+		\item \texttt{bam}: version of \texttt{gam} optimized for very big datasets
+		\item \texttt{gamm}: uses \texttt{nlme::lme} to fit the GAM as a mixed-effects model, so you can use \texttt{nlme}'s correlation structures
+		\item \texttt{jagam}: generates JAGS code
+	\end{itemize}
+	In package \texttt{gamm4}:
+	\begin{itemize}
+		\item \texttt{gamm4}: uses \texttt{lme4} to fit the GAM as a mixed-effects model; has advantages for model comparisons, but in practice often misconverges badly
+	\end{itemize}
+	In package \texttt{brms}:
+	\begin{itemize}
+		\item \texttt{brm}: understands GAM syntax by fitting the GAM as a mixed-effects model
+	\end{itemize}
+\end{frame}
+
+\topic{\texttt{mgcv}}
+
+\begin{frame}[fragile]
+	\frametitle{Fitting our first \texttt{gam}}
+\scriptsize
+<<>>=
+model <- gam(accel ~ s(times,bs='tp',k=10,m=2),data=mcycle,method='ML')
+summary(model)
+@
+
+\end{frame}
+
+\begin{frame}
+	\frametitle{What just happened?}
+	\begin{itemize}
+		\item \texttt{s()} fits a smooth to the predictor mentioned in its argument(s), here \texttt{times}
+		\item \texttt{bs='tp'}: use a \emph{thin-plate regression spline} as the basis (this is the default); fits a bendy line (or, in 2D, a bendy sheet, or in 3D, a bendy cube, etc)
+		\item \texttt{k=10}: ten basis functions
+		\item \texttt{m=2}: second-derivative penalty (this is the default)
+		\item \texttt{method='ML'} because this performs best in simulations, unless there are random effects in which case you should prefer \texttt{method='REML'}
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Possible spline bases}
+	Lots of possible bases (see \texttt{?smooth.construct}), but I want to focus on four here:
+	\begin{description}
+		\item[\texttt{bs='tp'}] the thin-plate regression spline
+		\item[]\texttt{s(times,bs='tp',k=10)}
+		\item[\texttt{bs='sos'}] splines on the sphere (use with \texttt{m=-1} or \texttt{m=-2} please)
+		\item[]\texttt{s(lat,lon,bs='sos',k=30,m=-1)}
+		\item[\texttt{bs='re'}] random intercepts (with factor argument) or random slopes (with factor and numeric arguments)
+		\item[]\texttt{s(subject,bs='re'); s(subject,covariate,bs='re')}
+		\item[]Wrong: \texttt{s(subject,factor,bs='re')}; use \texttt{s(subject,by=factor,bs='re')} instead
+		\item[\texttt{bs='fs'}] random smooths (use with first-derivative penalties please!)
+		\item[]\texttt{s(subject,covariate,bs='fs',xt='tp',k=10,m=1)}
+	\end{description}
+\end{frame}
+
+\begin{frame}
+	\frametitle{A simple 1-D smooth}
+	\begin{center}\texttt{s(x)}\end{center}
+	or, with the defaults explicitly filled in:
+	\begin{center}\texttt{s(x,bs='tp',k=9,m=2)}\end{center}
+	This creates a bendy line.
+\end{frame}
+
+\begin{frame}
+	\frametitle{Interactions --- smooth\texttt{+}smooth}
+	Some bases support \emph{isotropic} interactions, e.g.~this creates a 2D bendy sheet:
+	\begin{center}\texttt{s(x,y,bs='tp')}\end{center}
+	But if not isotropic, or if different splines should be combined, \texttt{\emph{te}} can be used to construct a \emph{tensor product}:
+	\begin{center}\texttt{te(Point,PhonolDiversity,PhonolAwareness,bs=c('tp','tp','tp'))}\end{center}
+(also see \texttt{ti} and \texttt{t2} --- the former is useful for model comparisons, the latter can be used to construct random tensor products: \texttt{t2(Subject,Point,PhonolDiversity,} \texttt{bs=c('re','tp','tp'),k=c(10,10,10),m=c(1,1,1),full=TRUE)})
+\end{frame}
+
+\begin{frame}
+	\frametitle{Interactions --- smooth\texttt{+}parametric}
+	Smooths can interact with \emph{factor variables} using the \texttt{by} argument:
+	\begin{center}\texttt{s(time,bs='tp',by=factor)}\end{center}
+	The above creates a separate smooth by every factor level; you also need to include \texttt{factor} as a main effect. If \texttt{factor} is an ordered factor, the first level is skipped.
+	\vfill
+	The \texttt{by} argument can also be used with \emph{covariates}, in which case the covariate directly multiplies the smooth:
+	\begin{center}\texttt{s(time,bs='tp',by=covariate)}\end{center}
+	In some cases, 0/1 dummy variables can be useful here. Do not also add them as main effects.
+	\vfill
+	More exotic interactions possible --- see \texttt{?gam.models}
+\end{frame}
+
+\topic{Checking assumptions}
+
+\begin{frame}[fragile]
+	\frametitle{Checking assumptions}
+\footnotesize
+<<fig.show='hide'>>=
+gam.check(model)
+@
+\end{frame}
+\begin{frame}[fragile]
+	\frametitle{Checking assumptions}
+\footnotesize
+<<echo=FALSE,results='hide',fig.width=5,fig.height=5,out.height='\\textheight'>>=
+gam.check(model)
+@
+\end{frame}
+
+\begin{frame}
+	\frametitle{$k$-values}
+	\begin{itemize}
+		\item We have too few basis functions: \texttt{k'} is 9, and the edf are \texttt{8.63}
+		\item Having too few basis functions leads to \emph{oversmoothing}
+		\item Having too many basis functions is OK, because the basis functions that are not useful will get penalized to 0 by the influence from the smoothing parameter
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Refit}
+\footnotesize
+<<fig.show='hide'>>=
+model <- gam(accel ~ s(times,bs='tp',k=30),data=mcycle,method='ML')
+gam.check(model)
+@
+\end{frame}
+\begin{frame}[fragile]
+	\frametitle{Refit}
+\footnotesize
+<<echo=FALSE,results='hide',fig.width=5,fig.height=5,out.height='\\textheight'>>=
+model <- gam(accel ~ s(times,bs='tp',k=30),data=mcycle,method='ML')
+gam.check(model)
+@
+\end{frame}
+
+\begin{frame}
+	\frametitle{Wrong \texttt{family}}
+	\vspace*{-2pt}
+	\begin{columns}
+		\begin{column}{0.5\textwidth}
+		\includegraphics[height=\textheight,keepaspectratio]{badfit}
+		\end{column}
+		\begin{column}{0.5\textwidth}
+		\includegraphics[height=\textheight,keepaspectratio]{gamcheckok}
+		\end{column}
+	\end{columns}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Families in \texttt{mgcv}}
+	See \texttt{?family.mgcv}:
+	\begin{itemize}
+		\item All regular GLM families
+		\item \emph{Extended families}: \texttt{ocat}, \texttt{tw}, \texttt{nb}, \texttt{betar}, \emph{\texttt{scat}}, \texttt{ziP}. Can be fitted through \texttt{bam} and \texttt{gam} with ML and REML estimation.
+		\item \emph{General families}: \texttt{cox.ph}, \texttt{gammals}, \texttt{gaulss}, \texttt{gevlss}, \texttt{gumbls}, \texttt{shash}, \texttt{ziplss}, \texttt{mvn}, \texttt{multinom}. Take \texttt{list}s of multiple formulas, and can only be fitted through \texttt{gam} with REML estimation only.
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Autocorrelation}
+	Specifically for time-series data: check that you indeed modeled all of the time-series structure, even with appropriate $k$ values (\texttt{acf(resid(model))})\\
+	\includegraphics[height=.8\textheight,keepaspectratio]{acf}\\
+	Requires data to be sorted by time last!
+\end{frame}
+
+\begin{frame}
+	\frametitle{Addressing autocorrelation}
+	\begin{itemize}
+		\item The ideal option: `event smooths' (Harald Baayen)
+	\begin{itemize}
+		\item Random smooths for every time series (e.g.~subject--item combination) in your data
+		\item Computationally devastating
+	\end{itemize}
+		\item Also OK: \texttt{gamm} with a suitable \texttt{correlation} argument
+	\begin{itemize}
+		\item Can only use regular exponential families
+		\item Convergence can be problematic
+	\end{itemize}
+		\item Also OK: \texttt{bam} with an AR(1) model
+	\begin{itemize}
+		\item Can fit simple AR(1) models only, but this is often already sufficient
+		\item Note: resulting residuals not corrected, so don't worry that they will show little change
+		\item Drawback: correlation is given by you, not estimated
+		\item See \texttt{?bam} on how to use arguments \texttt{AR.start} and \texttt{rho}; N.B.~in the generalized case you must use \texttt{discrete=TRUE}
+	\end{itemize}
+	\end{itemize}
+\end{frame}
+
+\topic{Model comparisons}
+
+\begin{frame}
+	\frametitle{Model comparisons}
+	Don't.\pause
+	Well...
+	\begin{itemize}
+		\item For linear additive models (Gaussian errors, identity link), generally OK
+		\item For generalized additive models, tricky due to the use of \emph{penalized quasi-likelihood}: a computational trick used to make the likelihood easier to compute
+		\item Used by \texttt{gam} (except with \texttt{outer} iteration), \texttt{gamm}, and \texttt{bam}
+		\item For linear models, the penalized quasi-likelihood and the real likelihood are equivalent, but not so in the generalized case: model comparisons invalid!
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Outer iteration}
+	\begin{itemize}
+		\item[\boxednumber{1}] Set up the bases
+		\item[\boxednumber{2}] Try a set of smoothing parameters
+			\begin{itemize}
+				\item[\boxednumber{1}] Try a set of model coefficients given the smoothing parameters
+				\item[\boxednumber{2}] Repeat \boxednumber{1} until the model coefficients are optimal
+			\end{itemize}
+		\item[\boxednumber{3}] Repeat \boxednumber{2} until the smoothing parameters are optimal
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{PQL}
+	\begin{itemize}
+		\item[\boxednumber{1}] Set up the bases
+		\item[\boxednumber{2}] Try a set of smoothing parameters and model coefficients
+		\item[\boxednumber{3}] Repeat \boxednumber{2} until all parameters are optimal
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Alternatives to model comparisons}
+	\begin{itemize}
+		\item Double penalties: \texttt{select=TRUE}
+		\item Shrinkage splines: \texttt{bs='ts'} instead of \texttt{bs='tp'}
+		\item Hypothesis testing
+		\item Parsimonious models
+	\end{itemize}
+	But if you must... my \texttt{R} package \texttt{buildmer} \emph{can} do model comparisons for GAMs, and errors out appropriately if you're falling into the PQL trap
+\end{frame}
+
+\topic{Inference}
+
+\begin{frame}
+	\frametitle{Hypothesis testing}
+	\begin{itemize}
+		\item Is my effect significant over the entire time course? $\rightarrow$ \texttt{summary} will tell you
+		\item \emph{Where} is my effect significant? $\rightarrow$ needs some work
+		\item Two options: \emph{difference smooths} and \emph{posterior inference}
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Difference smooths}
+	\begin{itemize}
+		\item The difference-smooth method constructs two \emph{planned comparisons}:
+			\begin{itemize}
+				\item[\boxednumber{1}] A reference smooth (similar to an intercept)
+				\item[\boxednumber{2}] A difference smooth (similar to a contrast)
+			\end{itemize}
+		\item The difference smooth is fitted as a parameter in the model
+		\item Answer the question: `is there a smooth difference between two conditions?'
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Difference smooths}
+\footnotesize
+<<message=FALSE,fig.height=3.5>>=
+group_by(lexdec, Class, Frequency) |>
+	summarize(RT = mean(RT)) |>
+	ggplot(aes(Frequency,RT)) |>
+	add(facet_wrap(~Class)) |>
+	add(geom_line()) |>
+	add(stat_smooth(method='gam'))
+@
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Difference smooths}
+\footnotesize
+<<fig.show='hold',fig.width=5>>=
+lexdec$ClassOrdered <- ordered(lexdec$Class) |>
+	C(treatment)
+model <- gam(RT ~ s(Frequency) + s(Frequency,by=ClassOrdered),data=lexdec,method='ML')
+plot(model,rug=FALSE,shade=TRUE)
+@
+\end{frame}
+
+\begin{frame}
+	\frametitle{Posterior inference}
+	\begin{itemize}
+		\item Posterior inference constructs \emph{post-hoc comparisons}
+		\item Constructs two \emph{independent} smooths per factor combination:
+			\begin{itemize}
+				\item[\boxednumber{1}] A smooth for animals
+				\item[\boxednumber{2}] A smooth for plants
+			\end{itemize}
+		\item After fitting the model, the user computes the difference between the fitted smooths and tests it against zero
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Fitting the model}
+\footnotesize
+<<fig.show='hold',fig.width=5>>=
+model <- gam(RT ~ s(Frequency,by=Class),data=lexdec,method='REML')
+plot(model,rug=FALSE,shade=TRUE)
+@
+\end{frame}
+
+\begin{frame}
+	\frametitle{Posterior inference: the procedure}
+		We are going to perform a completely standard \emph{Wald test} of the \emph{difference} between two fitted smooths
+	\begin{itemize}
+		\item[\boxednumber{1}] We obtain the linear predictors from the model for both animals and plants over a grid of, e.g.,~100 points
+		\item[\boxednumber{2}] We subtract the two
+		\item[\boxednumber{3}] We optionally zero out random effects
+		\item[\boxednumber{4}] We multiply them with the model coefficients
+		\item[\boxednumber{5}] We compute a 95\% credible interval for the difference (N.B.:~requires REML fit!)
+	\end{itemize}
+	\emph{Pro-Tip:} this is all automated by function \texttt{plot\_diff} from package \texttt{itsadug} (but with limitations, so eventually you'll come back here!)
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Computing posterior differences}
+	\footnotesize
+<<>>=
+minmax <- range(lexdec$Frequency)
+newdata <- data.frame(Frequency = seq(minmax[1],minmax[2],length.out=100))
+newdata.plants  <- transform(newdata, Class = 'plant')
+newdata.animals <- transform(newdata, Class = 'animal')
+lp.plants  <- predict(model,newdata=newdata.plants,type='lpmatrix')
+lp.animals <- predict(model,newdata=newdata.animals,type='lpmatrix')
+lp.diff <- lp.plants - lp.animals
+newdata <- mutate(newdata,
+		  RT = lp.diff %*% coef(model),
+		  SE = sqrt(diag(lp.diff %*% vcov(model) %*% t(lp.diff))),
+		  cimin = RT - 1.96 * SE,
+		  cimax = RT + 1.96 * SE)
+@
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Computing posterior differences}
+	\footnotesize
+<<>>=
+ggplot(newdata,aes(Frequency,RT)) +
+	geom_ribbon(aes(ymin=cimin,ymax=cimax),alpha=.3) +
+	geom_line() +
+	theme_bw()
+@
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Highlighting significance}
+	\footnotesize
+<<>>=
+newdata$cimin[sign(newdata$cimin) != sign(newdata$cimax)] <- NA
+ggplot(newdata,aes(Frequency,RT)) +
+	geom_ribbon(aes(ymin=cimin,ymax=cimax),alpha=.3) +
+	geom_line() +
+	theme_bw()
+@
+\end{frame}
+
+\topic{Wrapping up}
+
+\begin{frame}
+	\frametitle{What did you (hopefully) learn today?}
+	\tableofcontents
+\end{frame}
+
+\begin{frame}
+	\frametitle{Getting your feet wet}
+	\begin{itemize}
+		\item Today was really a \emph{crash course}
+		\item Hopefully, you have now received enough baggage from me to \emph{get started} analyzing your own data
+		\item Next week: \emph{working with real data}
+		\item If you have data of your own: bring them, try to analyze them yourself, and I'll be there to help you if you get stuck
+		\item For those of you who don't have any original data, I'll arrange two example problems
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Moving on from here}
+	\begin{itemize}
+		\item Go through Jacolien van Rij's excellent but slightly dated tutorial: \url{https://jacolienvanrij.com/Tutorials/GAMM.html}
+		\item Read \citet{wood}
+		\item Look into SCAMs
+		\item Look into quantile GAMs
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+\centering
+\Huge
+Thank you for your attention!
+\end{frame}
+
+\appendix
+
+\begin{frame}
+	\frametitle{References}
+	\printbibliography
+\end{frame}
+
+\end{document}
