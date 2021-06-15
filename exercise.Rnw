@@ -1,0 +1,148 @@
+\documentclass{scrartcl}
+\usepackage[backend=biber,natbib=true,citetracker=true,maxcitenames=1,uniquename=false,uniquelist=false,sortcites,style=unified,useprefix]{biblatex}
+\renewcommand*{\finalnamedelim}{\addthinspace\&\addthinspace}
+\newcommand\citeposst[1]{\citeauthor{#1}'s \citeyearpar{#1}}
+\newcommand\citepossalt[1]{\citeauthor{#1}'s \citeyear{#1}}
+\newcommand\citetpage[2]{\citeauthor{#1} (\citeyear{#1}:#2)}
+\newcommand\citealtpage[2]{\citeauthor{#1} \citeyear{#1}:#2}
+\addbibresource{references.bib}
+\usepackage[hidelinks]{hyperref}
+\usepackage{covington,tipa,upgreek}
+
+\title{GAM exercise}
+\author{Cesko Voeten}
+\date{\begin{tabular}{c}Leiden University Centre for Linguistics\\Leiden Institute for Brain and Cognition\\Fryske Akademy\end{tabular}}
+\begin{document}
+\maketitle
+
+\section{The problem}
+We're going to reproduce a small part of chapter 2 from my dissertation \citep{proefschrift}, which you can download from \url{https://surfdrive.surf.nl/files/index.php/s/1smuplppss50lga}. The goal of this chapter was to investigate a Dutch allophonic rule that looks something like the below:
+
+\begin{example}
+	\textipa{Ei} $\rightarrow$ \textipa{E:} / \_ \textipa{l} ]$_\upsigma$
+\end{example}
+
+\noindent What makes this hard is that Dutch coda /\textipa{l}/ is a dark [\textipa{\textsuperimposetilde{l}}] (exactly like English) \emph{and} is currently undergoing a process of vocalization, which makes it impossible to segment it off of the vowel of interest. But with GAMs, we don't have to!
+
+\section{The data}
+The data come from a word-list reading task, where 160 participants total from 8 dialect regions (four in the Netherlands and four in Flanders) were asked to read a small number of words. Two example words are \textit{meid} [\textipa{mEit}] and \textit{geil} [\textipa{GE:\textsuperimposetilde{l}}]. Words like these have been processed through the following steps:
+
+\begin{enumerate}
+	\item The start of the vowel was identified in Praat, so a boundary was placed between the [\textipa{m}] and the [\textipa{Ei}] or between the [\textipa{G}] and the [\textipa{E:}];
+	\item For the non-/\textipa{l}/ words, including \textit{meid}, the end of the vowel was identified and a boundary was placed there, so between e.g.~the [\textipa{Ei}] and the [\textipa{t}];
+	\item For the /\textipa{l}/ words, this wasn't possible so the boundary was placed after the [\textipa{\textsuperimposetilde{l}}];
+	\item Starting \emph{at} the initial boundary, formants were measured every 10 ms;
+	\item These samples were scaled to range from \texttt{0} (0\% realization, i.e.~the first measure taken at the initial boundary) to \texttt{100} (100\% realization rounded down from the final boundary).
+\end{enumerate}
+
+You can get the data from GitHub. Read them in like so:
+<<>>=
+data <- read.csv('data.csv',stringsAsFactors=TRUE) |>
+	within({
+		contrasts(gender) <- contr.sum
+		contrasts(following) <- contr.SAS
+		region <- factor(region,levels=c('NM','NN','NS','FB',
+						 'FL','FE','FW','NR'))
+		contrasts(region) <- contr.sum
+	})
+@
+\noindent If your R doesn't understand the \verb?|>? operator, update it, or load library \texttt{magrittr} and use its \verb?%>%? pipe instead.
+
+This is the structure of the data:
+<<>>=
+str(data)
+@
+This is what's in the columns:
+\begin{description}
+	\item[\texttt{participant}]: the speaker ID code;
+	\item[\texttt{word}]: the word that they read;
+	\item[\texttt{region}]: the dialect region, where regions starting with \textit{N} are in The Netherlands and regions starting with \textit{F} are in Flanders;
+	\item[\texttt{gender}]: the speaker's sex;
+	\item[\texttt{age}]: the speaker's age (coded as young or old);
+	\item[\texttt{vowel}]: the vowel they're saying;
+	\item[\texttt{time}]: the measurement point (from \texttt{0} to \texttt{100});
+	\item[\texttt{following}]: either \texttt{l} if the following vowel was a coda /\textipa{l}/ or \texttt{P} if it wasn't;
+	\item[\texttt{value}]: the formant measurement;
+	\item[\texttt{formant}]: the name of the formant (\texttt{f1}, \texttt{f2}, \texttt{f3}).
+\end{description}
+We will only focus on the first formant (this makes the critical difference between [\textipa{Ei}] and [\textipa{E:}]) and only for the (\textipa{Ei}) vowel. Please execute the following:
+<<>>=
+data <- data[data$formant == 'f1' & data$vowel == 'Ei',]
+@
+
+Explore the data as you like, e.g. by plotting things.
+
+\section{Running our first GAM}
+We're interested in a model that fits the first formant (which is now all in \texttt{value}) as a smooth function of time. We additionally want to incorporate regional differences. Finally, your exploratory playing around might have revealed a minor gender effect, in that there is a main effect of gender. To make sure we're on the same page, a very simple translation of these requirements into a GAM call would get you:
+
+<<>>=
+library(mgcv)
+model <- bam(value ~ gender + region + s(time,by=region),data=data,
+	     discrete=TRUE,control=list(trace=TRUE))
+@
+
+\noindent We're using \texttt{bam} because \texttt{gam} is too slow (with the default optimizer). We're using \texttt{discrete=TRUE} to make it even faster and because we'll need it later. This means REML only and no model comparisons. I'm also passing \texttt{control=list(trace=TRUE)} because I like to be able to guess if convergence is going to take one more minute or one more day. You might also want to fiddle with arguments like \texttt{nthreads} for even more speed---see the help pages.
+
+Here is the output of \texttt{gam.check}. What do you think? Also, do you think we missed something in our formula, conceptually? Here starts a journey that's all yours! But below you will find some pointers.
+
+<<>>=
+gam.check(model)
+@
+
+\section{Moving on from here}
+Here are things you might want to try, roughly in the order you might want to try them:
+
+\begin{enumerate}
+	\item Remove obvious outliers incurred by the automatic formant measurements. Very rough guideline: if it's $<100$ Hz or $>1000$ Hz, it definitely ain't a remotely valid F1. You can do better by doing some plotting, but this is what I did as a very rough first step in my chapter.
+	\item Check if you missed any predictors, such as random effects! Don't bother with random effects by words, though, because you need at least $>5$ levels of a random effect for it to be stably estimable (according to the friendly statisticians at \texttt{r-sig-mixed});
+		\begin{itemize}
+			\item Free hint: note that every subject is from exactly one dialect region.
+		\end{itemize}
+	\item Check if you missed any structure your smooths by checking their $k$-values;
+	\item Check if you missed any structure in your smooths by checking their autocorrelation;
+	\item Fit to scaled-$t$ errors (this is gonna be slow, though).
+\end{enumerate}
+
+For autocorrelation, read \texttt{bam}'s help page to figure out how to use the \texttt{AR.start} argument (hint: \texttt{time == 0}). \texttt{rho} can be guesstimated by fitting a model without AR and computing the average autocorrelation. Here is some free code to get you started---it computes the AR in the model residuals for every trial separately, and then gives you its average:
+
+<<eval=FALSE>>=
+res <- resid(model)
+bins <- findInterval(1:length(res),which(data$AR.start))
+res.binned <- split(res,bins)
+rhos <- sapply(res.binned,\(x) acf(x,plot=FALSE)$acf[2])
+(rho <- mean(rhos))
+@
+
+\section{Our end goal}
+What we ultimately want to know about is:
+\begin{enumerate}
+	\item Differences between the regions
+	\item Differences between non-/\textipa{l}/ and /\textipa{l}/ vowels
+	\item Differences between non-/\textipa{l}/ and /\textipa{l}/ vowels between the regions
+\end{enumerate}
+For number 1, you should be all set after today's bit on inference. There's only one extra step you need to take into account: you can only \texttt{predict()} from completely-specified datasets, which means that if you've included random effects, it'll also ask you for a specific random-effect level to make predictions for. The solution is to simply give it a random level (e.g.~the first in the data), and then to \emph{zero out the columns in the linear-predictor matrix for the random effects}. This means you'll do something like:
+
+<<eval=FALSE>>=
+newdata <- expand.grid(time=0:100,gender='m',region='NR',subject='NRmj1') |>
+	as.data.frame()
+lp <- predict(model,newdata=newdata,type='lpmatrix')
+lp[,grepl('subject',colnames(lp))] <- 0
+@
+
+You can suffice with specifically looking at regional differences between \texttt{NR} and the others: \texttt{NR} means `Netherlands-Randstad', which is the area around Amsterdam. The regional differences we're interested in are the result of ongoing sound changes, and they're the most advanced in this region, which means you can use it as a good basis for comparison.
+
+Should you finish all this and still have workshop time left over, feel free to think of ideas on how we could test the difference between /\textipa{l}/ and non-/\textipa{l}/ vowels!
+
+\printbibliography
+\begin{filecontents}{references.bib}
+@phdthesis{proefschrift,
+  school={Leiden University},
+  url={https://hdl.handle.net/1887/137723},
+  title={The adoption of sound change: Synchronic and diachronic processing of regional variation in {D}utch},
+  author={Voeten, Cesko Cis},
+  address={Leiden},
+  year={2020},
+  publisher={LOT}
+}
+\end{filecontents}
+\end{document}
